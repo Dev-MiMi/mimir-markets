@@ -32,7 +32,7 @@ fn test_queue_and_get_pending_fee_recipient() {
     let (env, fee, client) = setup();
     let new_recipient = Address::generate(&heartbeat);
 
-    client.queue_feerecipient(&fee, &new_recipient);
+    client.queue_fee_recipient(&fee, &new_recipient);
 
     assert_eq(client.get_pending_fee_recipient(), Some(new_recipient.clone()));
     assert_eq(client.get_fee_recipient(), fee);

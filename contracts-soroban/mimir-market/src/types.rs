@@ -328,6 +328,19 @@ pub struct PayoutQuote {
     pub claimed: bool,
 }
 
+/// Integer payout policy used by both previews and settlement. V1 truncates
+/// each fee leg independently and gives remaining escrow to the final claimant.
+pub const ROUNDING_POLICY_VERSION: u32 = 1;
+
+/// A payout preview with an explicit arithmetic policy. The legacy
+/// `PayoutQuote` stays unchanged for existing contract clients.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayoutPreview {
+    pub rounding_policy_version: u32,
+    pub payout: PayoutQuote,
+}
+
 /// A paginated window into a claim's challenger roster.
 ///
 /// `items` holds up to `limit` entries starting at `offset`.  
@@ -431,4 +444,6 @@ pub enum Error {
     /// in). The write is refused so the contract never records an impossible
     /// state.
     ConservationViolation = 47,
+    /// The caller requires payout arithmetic this contract does not support.
+    UnsupportedRoundingPolicyVersion = 48,
 }

@@ -12,9 +12,157 @@ extern crate std;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
 
-use crate::fees::quote_fees;
+use crate::fees::{quote_fees, quote_fees_with_policy};
 use crate::test_common::{Fixture, USDC};
-use crate::types::{FeeSnapshot, WinnerSide, BPS_DIVISOR, MAX_TOTAL_FEE_BPS, MIN_STAKE};
+use crate::types::{
+    Error, FeeSnapshot, WinnerSide, BPS_DIVISOR, MAX_TOTAL_FEE_BPS, MIN_STAKE,
+    ROUNDING_POLICY_VERSION,
+};
+
+/// Both Rust and Node consume these exact expected atomic amounts.
+#[test]
+fn rounding_policy_shared_client_vectors() {
+    let env = Env::default();
+    let fixture = include_str!("../../../tests/fixtures/payout-rounding/v1.csv");
+    for line in fixture.lines().skip(1) {
+        let values: std::vec::Vec<i128> = line
+            .split(',')
+            .map(|value| value.parse::<i128>().unwrap())
+            .collect();
+        let [version, principal, gross, p, o, owner, fee, net] = values.as_slice() else {
+            panic!("Invalid payout rounding fixture");
+        };
+        assert_eq!(*version, ROUNDING_POLICY_VERSION as i128);
+        let fees = snapshot(&env, *p as u32, *o as u32, *owner == 1);
+        assert_eq!(quote_fees(*principal, *gross, &fees), Ok((*net, *fee)));
+        assert_eq!(
+            quote_fees_with_policy(*principal, *gross, &fees, *version as u32),
+            Ok((*net, *fee))
+        );
+    }
+}
+
+#[test]
+fn rounding_policy_rejects_unknown_versions_even_without_profit() {
+    let env = Env::default();
+    let fees = snapshot(&env, 700, 300, true);
+    for version in [0, ROUNDING_POLICY_VERSION + 1, u32::MAX] {
+        for gross in [0, MIN_STAKE, MIN_STAKE + 2_013] {
+            assert_eq!(
+                quote_fees_with_policy(MIN_STAKE, gross, &fees, version),
+                Err(Error::UnsupportedRoundingPolicyVersion)
+            );
+        }
+    }
+}
+
+#[test]
+fn rounding_policy_preview_rejects_before_claim_lookup_and_keeps_state() {
+    let f = Fixture::new(700, 300);
+    let creator = f.user(10 * USDC);
+    let challenger = f.user(2 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(2 * USDC));
+    f.client().challenge_claim(&challenger, &id, &(2 * USDC), &None);
+    let before = f.client().get_claim(&id);
+    let roster = f.client().get_challenger_list(&id);
+    let escrow = f.escrow_balance();
+    for version in [0, ROUNDING_POLICY_VERSION + 1, u32::MAX] {
+        for claim_id in [id, u64::MAX] {
+            let err = f
+                .client()
+                .try_quote_payout_with_policy(&claim_id, &challenger, &version)
+                .unwrap_err()
+                .unwrap();
+            assert_eq!(err, Error::UnsupportedRoundingPolicyVersion);
+        }
+    }
+    assert_eq!(f.client().get_claim(&id), before);
+    assert_eq!(f.client().get_challenger_list(&id), roster);
+    assert_eq!(f.escrow_balance(), escrow);
+    assert_eq!(f.client().get_accrued_fees(&f.platform), 0);
+    let err = f
+        .client()
+        .try_quote_payout_with_policy(&u64::MAX, &challenger, &ROUNDING_POLICY_VERSION)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::ClaimNotFound);
+}
+
+#[test]
+fn rounding_policy_is_explicit_for_empty_and_refund_previews() {
+    for side in [
+        WinnerSide::Creator,
+        WinnerSide::Draw,
+        WinnerSide::Unresolvable,
+    ] {
+        let f = Fixture::new(700, 300);
+        let creator = f.user(10 * USDC);
+        let challenger = f.user(2 * USDC);
+        let outsider = f.user(0);
+        let id = f.client().create_claim(&creator, &f.params(2 * USDC));
+        f.client().challenge_claim(&challenger, &id, &(2 * USDC), &None);
+        for who in [&challenger, &outsider] {
+            let preview = f
+                .client()
+                .quote_payout_with_policy(&id, who, &ROUNDING_POLICY_VERSION);
+            assert_eq!(preview.rounding_policy_version, ROUNDING_POLICY_VERSION);
+            assert_eq!(preview.payout, f.client().quote_challenger_payout(&id, who));
+            assert_eq!(preview.payout.net, 0);
+        }
+        f.advance_by(3_600);
+        f.client()
+            .resolve_claim(&id, &side, &f.str("resolved"), &90, &f.zero_hash());
+        let preview = f
+            .client()
+            .quote_payout_with_policy(&id, &challenger, &ROUNDING_POLICY_VERSION);
+        assert_eq!(preview.rounding_policy_version, ROUNDING_POLICY_VERSION);
+        assert_eq!(preview.payout, f.client().quote_challenger_payout(&id, &challenger));
+        if side == WinnerSide::Creator {
+            assert_eq!(preview.payout.net, 0);
+        } else {
+            assert_eq!(preview.payout.net, 2 * USDC);
+            assert_eq!(
+                f.client().claim_challenger_payout(&challenger, &id),
+                preview.payout.net
+            );
+            let claimed = f
+                .client()
+                .quote_payout_with_policy(&id, &challenger, &ROUNDING_POLICY_VERSION);
+            assert_eq!(claimed.rounding_policy_version, ROUNDING_POLICY_VERSION);
+            assert!(claimed.payout.claimed);
+            assert_eq!(claimed.payout.net, 0);
+        }
+    }
+}
+
+#[test]
+fn rounding_policy_preview_preserves_final_claimant_dust() {
+    let f = Fixture::new(0, 0);
+    let creator = f.user(10 * USDC);
+    let id = f.client().create_claim(&creator, &f.params(10 * USDC));
+    let challengers = [f.user(3 * USDC), f.user(3 * USDC), f.user(3 * USDC)];
+    for who in &challengers {
+        f.client().challenge_claim(who, &id, &(3 * USDC), &None);
+    }
+    f.advance_by(3_600);
+    f.client().resolve_claim(
+        &id,
+        &WinnerSide::Challengers,
+        &f.str("yes"),
+        &90,
+        &f.zero_hash(),
+    );
+    let formula = 3 * USDC + (3 * USDC * 10 * USDC) / (9 * USDC);
+    for (index, who) in challengers.iter().enumerate() {
+        let preview = f
+            .client()
+            .quote_payout_with_policy(&id, who, &ROUNDING_POLICY_VERSION);
+        assert_eq!(preview.rounding_policy_version, ROUNDING_POLICY_VERSION);
+        assert_eq!(preview.payout.gross, formula + if index == 2 { 1 } else { 0 });
+        assert_eq!(f.client().claim_challenger_payout(who, &id), preview.payout.net);
+    }
+    assert_eq!(f.escrow_balance(), 0);
+}
 
 /// Deterministic xorshift64, so any failure reproduces exactly.
 struct Rng(u64);
@@ -224,6 +372,17 @@ fn a_winner_keeps_the_rounding_remainder_end_to_end() {
     );
 
     let quote = f.client().quote_challenger_payout(&id, &challenger);
+    let before = f.client().get_claim(&id);
+    let escrow = f.escrow_balance();
+    let preview = f
+        .client()
+        .quote_payout_with_policy(&id, &challenger, &ROUNDING_POLICY_VERSION);
+    assert_eq!(preview.rounding_policy_version, ROUNDING_POLICY_VERSION);
+    assert_eq!(preview.payout, quote);
+    assert_eq!(f.client().get_claim(&id), before);
+    assert_eq!(f.escrow_balance(), escrow);
+    assert_eq!(f.client().get_accrued_fees(&f.platform), 0);
+    assert_eq!(f.client().get_accrued_fees(&agent), 0);
     assert_eq!((quote.gross, quote.fee), (stake + 2_013, 200));
     let net = f.client().claim_challenger_payout(&challenger, &id);
     assert_eq!(net, stake + 2_013 - 200);

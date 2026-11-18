@@ -24,6 +24,8 @@
 import { unitsToUsdc, usdcToUnits } from "./usdc";
 import {
   MAX_TOTAL_FEE_BPS,
+  ROUNDING_POLICY_VERSION,
+  requireRoundingPolicy,
   snapshotFeePolicy,
   splitFees,
   type FeeSplit,
@@ -386,6 +388,8 @@ export function feeStateFromClaimFees(view: ClaimFeeView | null | undefined): Pa
 
 /** The gross math plus the fee split the claim's snapshot will apply to it. */
 export interface PrincipalSafePayout {
+  /** Arithmetic policy shared with contract settlement. */
+  roundingPolicyVersion: number;
   /** Pool / duel / fixed-odds math, pre-fee. Untouched by the fee step. */
   gross: PayoutBreakdown;
   /** The contract's `quote_fees` arithmetic over the gross. */
@@ -428,12 +432,15 @@ export function principalSafePayout(args: {
   feeState: PayoutFeeState;
   /** A winning challenger by default. Only non-refund outcomes take a fee. */
   outcome?: SettlementOutcome;
+  requiredRoundingPolicyVersion?: number;
 }): PrincipalSafePayout {
+  requireRoundingPolicy(args.requiredRoundingPolicyVersion ?? ROUNDING_POLICY_VERSION);
   const { gross, feeState, outcome = "challengers_win" } = args;
   const principalUnits = gross.returnedPrincipalUnits;
 
   if (feeState.status !== "ready") {
     return {
+      roundingPolicyVersion: ROUNDING_POLICY_VERSION,
       gross,
       feeState,
       clamped: false,
@@ -479,6 +486,7 @@ export function principalSafePayout(args: {
 
   const totalFeeUnits = platformFeeUnits + agentOwnerFeeUnits;
   return {
+    roundingPolicyVersion: ROUNDING_POLICY_VERSION,
     gross,
     feeState,
     clamped,
@@ -502,6 +510,7 @@ export function principalSafePayout(args: {
  * fee) would invent a number, but it must be labelled.
  */
 export interface PrincipalSafePayoutPreview {
+  roundingPolicyVersion: number;
   /** Gross, pre-fee display numbers — the same ones `previewChallengerPayout` returns. */
   gross: PayoutDisplay;
   feeStatus: PayoutFeeStatus;
@@ -541,6 +550,7 @@ export function toPrincipalSafePreview(payout: PrincipalSafePayout): PrincipalSa
     netProfitUnits: payout.split.netProfitUnits,
   };
   return {
+    roundingPolicyVersion: payout.roundingPolicyVersion,
     gross: toPayoutDisplay(payout.gross),
     feeStatus: payout.feeState.status,
     principal,
@@ -576,11 +586,15 @@ export function previewChallengerPayoutSafe(args: {
   challengerPayoutBps?: number;
   /** Defaults to `unavailable`, which previews the gross and says so. */
   fees?: PayoutFeeState;
+  /** Defaults to the supported v1 policy; unknown versions throw. */
+  requiredRoundingPolicyVersion?: number;
 }): PrincipalSafePayoutPreview {
+  requireRoundingPolicy(args.requiredRoundingPolicyVersion ?? ROUNDING_POLICY_VERSION);
   return toPrincipalSafePreview(
     principalSafePayout({
       gross: challengerPayoutUnits(args),
       feeState: args.fees ?? { status: "unavailable" },
+      requiredRoundingPolicyVersion: args.requiredRoundingPolicyVersion,
     }),
   );
 }

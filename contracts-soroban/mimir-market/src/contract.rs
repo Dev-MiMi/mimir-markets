@@ -6,12 +6,13 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 use crate::admin;
 use crate::claims;
 use crate::escrow;
+use crate::fees;
 use crate::resolve;
 use crate::storage;
 use crate::types::{
     Challenger, ChallengerPage, Claim, ClaimFeeView, CreateParams, Error, FeePolicy,
-    MarketConfig, PayoutQuote, PendingFeePolicy, PendingOracle, PlatformStats, Verdict,
-    WinnerSide, MAX_BATCH_SIZE,
+    MarketConfig, PayoutPreview, PayoutQuote, PendingFeePolicy, PendingOracle, PlatformStats,
+    Verdict, WinnerSide, MAX_BATCH_SIZE, ROUNDING_POLICY_VERSION,
 };
 
 #[contract]
@@ -344,6 +345,22 @@ impl MimirMarket {
         challenger: Address,
     ) -> Result<PayoutQuote, Error> {
         resolve::quote_challenger_payout(&env, claim_id, &challenger)
+    }
+
+    /// Preview a challenger payout under an explicitly required rounding policy.
+    /// Unsupported versions fail before any claim read. No authorization,
+    /// settlement state change, fee accrual or token transfer is performed.
+    pub fn quote_payout_with_policy(
+        env: Env,
+        claim_id: u64,
+        challenger: Address,
+        required_policy_version: u32,
+    ) -> Result<PayoutPreview, Error> {
+        fees::require_rounding_policy(required_policy_version)?;
+        Ok(PayoutPreview {
+            rounding_policy_version: ROUNDING_POLICY_VERSION,
+            payout: resolve::quote_challenger_payout(&env, claim_id, &challenger)?,
+        })
     }
 
     pub fn get_platform_stats(env: Env) -> Result<PlatformStats, Error> {

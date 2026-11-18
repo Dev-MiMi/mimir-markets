@@ -31,6 +31,16 @@
 
 export const BPS_DIVISOR = 10_000n;
 
+/** Mirrors types.rs::ROUNDING_POLICY_VERSION; shared fixtures pin agreement. */
+export const ROUNDING_POLICY_VERSION = 1;
+
+/** Zero is not a wildcard. Unknown policies must never produce a v1 preview. */
+export function requireRoundingPolicy(requiredPolicyVersion: number): void {
+  if (requiredPolicyVersion !== ROUNDING_POLICY_VERSION) {
+    throw new RangeError(`Unsupported rounding policy version: ${requiredPolicyVersion}`);
+  }
+}
+
 /**
  * Address handling on Stellar.
  *
@@ -187,7 +197,9 @@ export function splitFees(args: {
   grossPayoutUnits: bigint;
   snapshot: FeeSnapshot;
   outcome: SettlementOutcome;
+  requiredRoundingPolicyVersion?: number;
 }): FeeSplit {
+  requireRoundingPolicy(args.requiredRoundingPolicyVersion ?? ROUNDING_POLICY_VERSION);
   const { principalUnits, grossPayoutUnits, snapshot, outcome } = args;
 
   // A refund is returned whole. There is no profit to charge, and taking a cut of

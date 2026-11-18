@@ -4,7 +4,16 @@ use soroban_sdk::Env;
 
 use crate::events;
 use crate::storage;
-use crate::types::{Error, FeeSnapshot, BPS_DIVISOR};
+use crate::types::{Error, FeeSnapshot, BPS_DIVISOR, ROUNDING_POLICY_VERSION};
+
+/// Fail closed before reading a claim or calculating a preview. Zero is not a
+/// wildcard: callers must explicitly request the supported policy.
+pub fn require_rounding_policy(required_policy_version: u32) -> Result<(), Error> {
+    if required_policy_version != ROUNDING_POLICY_VERSION {
+        return Err(Error::UnsupportedRoundingPolicyVersion);
+    }
+    Ok(())
+}
 
 /// `stake * bps / BPS_DIVISOR`, truncating. Checked multiplication so an
 /// absurd stake errors instead of wrapping, matching Solidity 0.8 revert-on-
@@ -39,6 +48,18 @@ pub fn pool_share(
 /// this unreachable for the platform fee; keeping it here means a malformed
 /// snapshot can never mint an unclaimable balance.
 pub fn quote_fees(principal: i128, gross: i128, fees: &FeeSnapshot) -> Result<(i128, i128), Error> {
+    quote_fees_with_policy(principal, gross, fees, ROUNDING_POLICY_VERSION)
+}
+
+/// Versioned entry to the same fee arithmetic used by `apply_fees`. Validate
+/// before the no-profit fast path so refunds also reject an unknown policy.
+pub fn quote_fees_with_policy(
+    principal: i128,
+    gross: i128,
+    fees: &FeeSnapshot,
+    required_policy_version: u32,
+) -> Result<(i128, i128), Error> {
+    require_rounding_policy(required_policy_version)?;
     if gross <= principal {
         return Ok((gross, 0));
     }

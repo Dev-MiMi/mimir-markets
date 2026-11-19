@@ -150,6 +150,44 @@ test("existing snapshot failure cannot silently disable duplicate checks", () =>
   assert.throws(() => buildDryRunBatchManifest(input([], { existingCandidates: [{ question: "x", resolutionUrl: "x" }] })), /require/);
 });
 
+test("rejected URLs cannot leak embedded credentials into serialized manifests", () => {
+  const secret = "synthetic-password-do-not-export";
+  const username = "synthetic-user-do-not-export";
+  const urls = [
+    `https://${username}:${secret}@example.org/source`,
+    `https://${username}@example.org/source`,
+    `https://:${secret}@example.org/source`,
+    `https://${encodeURIComponent(username)}:${encodeURIComponent(secret)}@example.org/source`,
+    `https://${username}:${secret}@`,
+    `ftp://${username}:${secret}@example.org/source`,
+    "file:///tmp/synthetic-source",
+  ];
+  const batch = input(urls.map((resolutionUrl, i) => candidate(`Private URL ${i}`, { resolutionUrl })));
+  const original = JSON.stringify(batch);
+  const manifest = buildDryRunBatchManifest(batch);
+  assert.ok(manifest.entries.every((entry) => entry.rejection?.code === "invalid_resolution_url"));
+  assert.ok(manifest.entries.every((entry) => entry.resolutionUrl === null));
+  assert.deepEqual(manifest.entries.map((entry) => entry.statement), urls.map((_, i) => `Private URL ${i}`));
+  assert.equal(manifest.summary.proposed, 0);
+  assert.equal(manifest.budget.plannedStakeAtomic, "0");
+  const serialized = serializeDryRunBatchManifest(manifest);
+  assert.equal(serialized.includes(username), false);
+  assert.equal(serialized.includes(secret), false);
+  assert.equal(JSON.stringify(batch), original, "caller input is not mutated");
+  assert.equal(serialized, serializeDryRunBatchManifest(buildDryRunBatchManifest(batch)));
+});
+
+test("valid URLs retain their exact spelling even when another rule rejects a draft", () => {
+  const resolutionUrl = "https://EXAMPLE.org/Source/?case=Mixed#Section";
+  const manifest = buildDryRunBatchManifest(input([
+    candidate("Safe source", { resolutionUrl }),
+    candidate("Expired with safe source", { resolutionUrl, deadline: NOW }),
+  ]));
+  assert.equal(manifest.entries[0].status, "proposed");
+  assert.equal(manifest.entries[1].rejection?.code, "deadline_elapsed");
+  assert.ok(manifest.entries.every((entry) => entry.resolutionUrl === resolutionUrl));
+});
+
 test("drafting APIs keep supported parsing and threshold filtering behavior", async () => {
   const rows = [candidate(), candidate("Unsafe", { threshold: 0.5 }), { question: "Incomplete" }];
   const raw = "Prose\n```json\n" + JSON.stringify(rows) + "\n```";
@@ -211,6 +249,28 @@ test("published synthetic fixture matches the deterministic manifest", () => {
   const fixture = JSON.parse(readFileSync(new URL("../fixtures/market-creator-manifest/batch.json", import.meta.url), "utf8"));
   const expected = readFileSync(new URL("../fixtures/market-creator-manifest/manifest.json", import.meta.url), "utf8");
   assert.equal(serializeDryRunBatchManifest(buildDryRunBatchManifest(fixture)), expected);
+});
+
+test("CLI exports the rejection reason while withholding URL credentials", () => {
+  const directory = mkdtempSync(join(tmpdir(), "creator-manifest-privacy-"));
+  try {
+    const source = join(directory, "batch.json");
+    const output = join(directory, "manifest.json");
+    const password = "synthetic-cli-password-do-not-export";
+    const batch = input([candidate("Private source", { resolutionUrl: `https://synthetic-user:${password}@example.org` })]);
+    writeFileSync(source, JSON.stringify(batch));
+    assert.equal(exportBatchManifest(["--input", source, "--out", output]), 0);
+    const exported = readFileSync(output, "utf8");
+    const manifest = JSON.parse(exported);
+    assert.equal(manifest.entries[0].rejection.code, "invalid_resolution_url");
+    assert.equal(manifest.entries[0].resolutionUrl, null);
+    assert.equal(exported.includes(password), false);
+    assert.equal(exported.includes("synthetic-user"), false);
+    assert.equal(statSync(output).mode & 0o777, 0o600);
+    assert.equal(readFileSync(source, "utf8"), JSON.stringify(batch));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("all valid proposals beyond a count cap remain in the report", () => {

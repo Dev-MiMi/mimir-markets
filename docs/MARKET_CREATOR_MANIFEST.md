@@ -38,6 +38,11 @@ Candidates use the existing drafting shape: `question`, `resolutionUrl`,
 The captured source/model payload itself and unknown candidate fields are not
 copied to the output. Each candidate receives its original array index,
 statement, stake, decision and rejection reason, including malformed entries.
+Rejected source URLs are exported as `resolutionUrl: null` when malformed,
+non-HTTP(S), or containing a username/password. The `invalid_resolution_url`
+code and statement remain available without copying credentials into the
+manifest. Valid source URLs retain their spelling, including when another rule
+rejects the candidate; captured input files are never modified.
 
 ## Output and rejection rules
 

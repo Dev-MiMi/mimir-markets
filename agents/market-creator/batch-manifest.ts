@@ -125,6 +125,7 @@ export function buildDryRunBatchManifest(input: BatchManifestInput): DryRunBatch
 
   const entries = parsed.entries.map(({ index, statement, candidate }): BatchManifestEntry => {
     let rejection: BatchManifestEntry["rejection"] = null;
+    let resolutionUrl = candidate?.resolutionUrl ?? null;
     const reject = (code: BatchRejectionCode, detail: string) => { rejection = { code, detail }; };
     if (!candidate) {
       reject("invalid_candidate", "Draft must contain a nonempty question, resolutionUrl and deadline");
@@ -135,6 +136,9 @@ export function buildDryRunBatchManifest(input: BatchManifestInput): DryRunBatch
       const thresholdReason = candidate.threshold === undefined ? null : cryptoThresholdReason(candidate.threshold);
       const signature = buildCandidateSignature(candidate);
       if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+        // A rejected source URL can still contain credentials. Keep its reason,
+        // but never copy the unsafe value into a shareable manifest.
+        resolutionUrl = null;
         reject("invalid_resolution_url", "Resolution URL must be HTTP(S) without embedded credentials");
       } else if (deadline === null) {
         reject("invalid_deadline", "Deadline must be a valid ISO timestamp with timezone");
@@ -162,7 +166,7 @@ export function buildDryRunBatchManifest(input: BatchManifestInput): DryRunBatch
     return {
       index,
       statement,
-      resolutionUrl: candidate?.resolutionUrl ?? null,
+      resolutionUrl,
       deadline: candidate?.deadline ?? null,
       category: candidate?.category ?? null,
       threshold: candidate?.threshold !== undefined && Number.isFinite(candidate.threshold) ? candidate.threshold : null,

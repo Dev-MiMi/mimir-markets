@@ -24,7 +24,7 @@ use crate::escrow;
 use crate::events;
 use crate::fees;
 use crate::storage;
-use crate::types::{Challenger, Claim, ClaimState, Error, PayoutQuote, Verdict, WinnerSide};
+use crate::types::{Challenger, Claim, ClaimPreflight, ClaimState, Error, PayoutQuote, PreflightReason, Verdict, WinnerSide};
 use crate::util;
 
 pub fn resolve_claim(

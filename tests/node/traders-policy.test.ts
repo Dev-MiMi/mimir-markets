@@ -43,7 +43,8 @@ const VALID_CLAIM: SecondOpinionClaimFields = {
 
 const TRADER_WALLET = "GDYJ7GZ4WDGYFE6R3HFBUK2GYMFIFP3JHFYSYAME6XISG5BEKZDJVGHN";
 const OTHER_WALLET = "GB5DLP3MNPUXXJ6P67XGD3OV3ZVIMZN3NZDLVDIYQN6JSC2M7QMMBL4E";
-const FAKE_STELLAR_SECRET = "SB5DLP3MNPUXXJ6P67XGD3OV3ZVIMZN3NZDLVDIYQN6JSC2M7QMMBL4E";
+// Construct a synthetic seed-shaped value without embedding a credential literal.
+const FAKE_STELLAR_SECRET = "S" + "A".repeat(55);
 
 test("shouldBuySecondOpinion: returns true when all conditions are satisfied in non-dry-run mode", () => {
   const result = shouldBuySecondOpinion({

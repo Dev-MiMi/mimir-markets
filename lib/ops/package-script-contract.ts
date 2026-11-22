@@ -47,6 +47,11 @@ export interface ReviewedScriptSpec {
  */
 export const REVIEWED_PACKAGE_SCRIPTS: Readonly<Record<string, ReviewedScriptSpec>> = Object.freeze({
   // App lifecycle
+  "market-creator:manifest": {
+    command: "tsx scripts/market-creator-manifest.ts",
+    category: "worker",
+    supportsArgForwarding: true,
+  },
   dev: { command: "next dev", category: "app", supportsArgForwarding: true },
   "dev:clean": { command: "rm -rf .next && next dev", category: "app", supportsArgForwarding: false },
   clean: { command: "rm -rf .next", category: "app", supportsArgForwarding: false },

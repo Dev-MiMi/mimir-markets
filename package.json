@@ -55,6 +55,7 @@
     "verify:package-scripts": "node --import tsx scripts/verify-package-scripts.ts",
     "oracle": "tsx --env-file-if-exists=.env.local agents/oracle/index.ts",
     "oracle:challenge": "AUTO_CHALLENGE=1 tsx --env-file-if-exists=.env.local agents/oracle/index.ts",
+    "market-creator:manifest": "tsx scripts/market-creator-manifest.ts",
     "market-creator": "tsx --env-file-if-exists=.env.local agents/market-creator/index.ts",
     "council": "tsx --env-file-if-exists=.env.local agents/council/index.ts",
     "sync": "tsx --env-file-if-exists=.env.local agents/sync/index.ts",
